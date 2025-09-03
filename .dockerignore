@@ -1,0 +1,27 @@
+# Do not bake secrets or local artifacts into the image
+.env
+*.env
+.env.*
+
+# Local DB and media (use volumes instead)
+db.sqlite3
+media/
+staticfiles/
+
+# Python caches
+__pycache__/
+*.py[cod]
+
+# Virtual envs
+.venv/
+venv/
+
+# VCS
+.git/
+.gitignore
+
+# OS files
+.DS_Store
+
+# Frontend source (not needed in backend image)
+frontend/

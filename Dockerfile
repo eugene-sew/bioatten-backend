@@ -35,7 +35,11 @@ USER appuser
 # Collect static files at build time (safe for SQLite)
 RUN python manage.py collectstatic --noinput || true
 
+# Copy and configure entrypoint
+COPY --chown=appuser:appuser entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
 EXPOSE 8000
 
-# Run migrations then start Daphne (ASGI)
-CMD sh -c "python manage.py migrate --noinput && daphne -b 0.0.0.0 -p 8000 bioattend.asgi:application"
+# Use entrypoint to handle migrations and start server
+ENTRYPOINT ["/app/entrypoint.sh"]
