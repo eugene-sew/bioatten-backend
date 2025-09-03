@@ -1,0 +1,140 @@
+"""
+Script to visualize Django models without requiring database connection
+"""
+import os
+import sys
+import django
+
+# Add project to path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# Configure Django settings
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'bioattend.settings')
+django.setup()
+
+# Import models
+from authentication.models import User
+from students.models import StudentGroup, Student
+from faculty.models import Faculty
+from schedules.models import Schedule
+from attendance.models import AttendanceLog
+
+# Print model structure
+print("=== BIOATTEND DATABASE MODELS ===\n")
+
+print("1. User (authentication.User)")
+print("   - id: UUID (PK)")
+print("   - email: EmailField (unique)")
+print("   - first_name: CharField")
+print("   - last_name: CharField")
+print("   - role: CharField (ADMIN/STUDENT/FACULTY)")
+print("   - is_active: BooleanField")
+print("   - is_staff: BooleanField")
+print("   - date_joined: DateTimeField")
+print("   - last_login: DateTimeField")
+print("   - reset_token: CharField")
+print("   - reset_token_created: DateTimeField")
+print()
+
+print("2. StudentGroup (students.StudentGroup)")
+print("   - id: BigAutoField (PK)")
+print("   - name: CharField (unique)")
+print("   - code: CharField (unique)")
+print("   - description: TextField")
+print("   - academic_year: CharField")
+print("   - semester: CharField")
+print("   - created_at: DateTimeField (auto)")
+print("   - updated_at: DateTimeField (auto)")
+print("   - is_deleted: BooleanField")
+print("   - deleted_at: DateTimeField")
+print("   * Unique Together: (name, academic_year, semester)")
+print()
+
+print("3. Student (students.Student)")
+print("   - id: BigAutoField (PK)")
+print("   - user: OneToOneField → User (FK)")
+print("   - student_id: CharField (unique)")
+print("   - group: ForeignKey → StudentGroup")
+print("   - enrollment_date: DateField")
+print("   - graduation_date: DateField")
+print("   - status: CharField (ACTIVE/INACTIVE/GRADUATED/SUSPENDED/WITHDRAWN)")
+print("   - created_at: DateTimeField (auto)")
+print("   - updated_at: DateTimeField (auto)")
+print("   - is_deleted: BooleanField")
+print("   - deleted_at: DateTimeField")
+print()
+
+print("4. Faculty (faculty.Faculty)")
+print("   - id: BigAutoField (PK)")
+print("   - user: OneToOneField → User (FK)")
+print("   - faculty_id: CharField (unique)")
+print("   - department: CharField")
+print("   - designation: CharField")
+print("   - office_location: CharField")
+print("   - phone_number: CharField")
+print("   - join_date: DateField")
+print("   - status: CharField (ACTIVE/INACTIVE/ON_LEAVE/RETIRED)")
+print("   - created_at: DateTimeField (auto)")
+print("   - updated_at: DateTimeField (auto)")
+print("   - is_deleted: BooleanField")
+print("   - deleted_at: DateTimeField")
+print()
+
+print("5. Schedule (schedules.Schedule)")
+print("   - id: BigAutoField (PK)")
+print("   - course_code: CharField")
+print("   - course_name: CharField")
+print("   - student_group: ForeignKey → StudentGroup")
+print("   - faculty: ForeignKey → Faculty")
+print("   - weekday: IntegerField (0-6)")
+print("   - start_time: TimeField")
+print("   - end_time: TimeField")
+print("   - room: CharField")
+print("   - is_active: BooleanField")
+print("   - effective_from: DateField")
+print("   - effective_until: DateField")
+print("   - created_at: DateTimeField (auto)")
+print("   - updated_at: DateTimeField (auto)")
+print("   - is_deleted: BooleanField")
+print("   - deleted_at: DateTimeField")
+print("   * Unique Together: (student_group, weekday, start_time, room, effective_from)")
+print("   * Unique Together: (faculty, weekday, start_time, effective_from)")
+print()
+
+print("6. AttendanceLog (attendance.AttendanceLog)")
+print("   - id: BigAutoField (PK)")
+print("   - student: ForeignKey → Student")
+print("   - schedule: ForeignKey → Schedule")
+print("   - date: DateField")
+print("   - status: CharField (PRESENT/ABSENT/LATE/EXCUSED)")
+print("   - check_in_time: TimeField")
+print("   - check_out_time: TimeField")
+print("   - face_recognition_confidence: FloatField")
+print("   - face_image_path: CharField")
+print("   - is_manual_override: BooleanField")
+print("   - override_reason: TextField")
+print("   - override_by: ForeignKey → User")
+print("   - created_at: DateTimeField (auto)")
+print("   - updated_at: DateTimeField (auto)")
+print("   - is_deleted: BooleanField")
+print("   - deleted_at: DateTimeField")
+print("   * Unique Together: (student, schedule, date)")
+print()
+
+print("=== RELATIONSHIPS ===")
+print("- User 1:1 Student (via student_profile)")
+print("- User 1:1 Faculty (via faculty_profile)")
+print("- StudentGroup 1:N Student (via students)")
+print("- StudentGroup 1:N Schedule (via schedules)")
+print("- Faculty 1:N Schedule (via schedules)")
+print("- Student 1:N AttendanceLog (via attendance_logs)")
+print("- Schedule 1:N AttendanceLog (via attendance_logs)")
+print("- User 1:N AttendanceLog (via attendance_overrides)")
+print()
+
+print("=== FEATURES ===")
+print("✓ Automatic timestamps (created_at, updated_at)")
+print("✓ Soft delete functionality (is_deleted, deleted_at)")
+print("✓ Proper indexes on foreign keys and frequently queried fields")
+print("✓ Uniqueness constraints to prevent duplicates")
+print("✓ Data validation in model clean() methods")

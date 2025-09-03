@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BioAttend Notification</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 20px;
+        background-color: #f8fafc;
+      }
+      .container {
+        max-width: 600px;
+        margin: 0 auto;
+        background: white;
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+      }
+      .header {
+        background: linear-gradient(135deg, #1e40af, #059669);
+        color: white;
+        padding: 30px;
+      }
+      .content {
+        padding: 30px;
+      }
+      .footer {
+        background: #374151;
+        color: white;
+        padding: 30px;
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>BioAttend</h1>
+        <p>School Attendance Platform</p>
+      </div>
+      <div class="content">
+        <h2>Welcome to BioAttend!</h2>
+        <p>Hello {{ user.first_name }},</p>
+        <p>Your account has been successfully created. You can now log in using the following credentials:</p>
+        <ul>
+            <li><strong>Email:</strong> {{ user.email }}</li>
+            <li><strong>Temporary Password:</strong> {{ password }}</li>
+        </ul>
+        <p>For your security, we strongly recommend that you change your password immediately after your first login.</p>
+        <p>Thank you for joining BioAttend!</p>
+      </div>
+      <div class="footer">
+        <p>BioAttend Platform</p>
+        <p>Visit: bioattend.ballotbase.online</p>
+      </div>
+    </div>
+  </body>
+</html>
