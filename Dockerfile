@@ -1,45 +1,70 @@
-FROM python:3.11-slim
+# ------------------------------------------------------------------------------
+# Base Image: Use bullseye for better manylinux wheel support
+# ------------------------------------------------------------------------------
+FROM python:3.11-bullseye AS base
 
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    CMAKE_BUILD_PARALLEL_LEVEL=4 \
+    DJANGO_SETTINGS_MODULE=bioattend.settings
 
-# Set work directory
 WORKDIR /app
 
-# Install system dependencies (no Postgres; add libs for OpenCV/dlib)
+# ------------------------------------------------------------------------------
+# Install System Dependencies
+# ------------------------------------------------------------------------------
+# - Install build tools only for compiling dependencies like dlib and pygraphviz
+# - Will be cleaned up after pip install to keep image small
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    cmake \
     gcc \
     g++ \
-    cmake \
+    graphviz \
+    graphviz-dev \
     libgl1 \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
     libxrender1 \
+    libpq-dev \
+    pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
+# ------------------------------------------------------------------------------
 # Install Python dependencies
-COPY requirements.txt /app/
+# ------------------------------------------------------------------------------
+COPY deploy_requirements.txt /app/
 RUN pip install --upgrade pip && \
-    pip install -r requirements.txt
+    pip install "setuptools==80.9.0" && \
+    pip install -r deploy_requirements.txt
 
-# Copy project
+# ------------------------------------------------------------------------------
+# Copy application code
+# ------------------------------------------------------------------------------
 COPY . /app/
 
-# Create a non-root user to run the app
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+# ------------------------------------------------------------------------------
+# Create non-root user
+# ------------------------------------------------------------------------------
+RUN groupadd -g 1000 appuser && \
+    useradd -m -u 1000 -g appuser appuser && \
+    chown -R appuser:appuser /app
+
 USER appuser
 
-# Collect static files at build time (safe for SQLite)
+# ------------------------------------------------------------------------------
+# Collect static files
+# ------------------------------------------------------------------------------
 RUN python manage.py collectstatic --noinput || true
 
-# Copy and configure entrypoint
+# ------------------------------------------------------------------------------
+# Entrypoint
+# ------------------------------------------------------------------------------
 COPY --chown=appuser:appuser entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
 EXPOSE 8000
 
-# Use entrypoint to handle migrations and start server
 ENTRYPOINT ["/app/entrypoint.sh"]

@@ -31,7 +31,10 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-okj%sron#2b@job!z!9rel1c=)
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DEBUG', 'True') == 'True'
 
-ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+ALLOWED_HOSTS = os.getenv(
+    'ALLOWED_HOSTS',
+    'localhost,127.0.0.1,.ngrok-free.app,bioattend.ballotbase.online'
+).split(',')
 
 
 # Application definition
@@ -171,7 +174,12 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 AUTH_USER_MODEL = 'authentication.User'
 
 # CORS settings
-CORS_ALLOWED_ORIGINS = ['http://localhost:5173', 'http://127.0.0.1:5173']
+# Only explicit, valid origins (with scheme) are allowed. Add more via env if needed.
+CORS_ALLOWED_ORIGINS = [
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'https://bioattend.ballotbase.online',
+]
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOW_METHODS = [
@@ -195,7 +203,13 @@ CORS_ALLOW_HEADERS = [
 ]
 
 # CSRF settings (needed when using cookies across origins; safe to include for dev)
-CSRF_TRUSTED_ORIGINS = ['http://localhost:5173', 'http://127.0.0.1:5173']
+# Using JWTs does not require CSRF, but adding trusted origins is harmless and helps if cookies are used.
+CSRF_TRUSTED_ORIGINS = [
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'https://bioattend.ballotbase.online',
+    'https://*.ngrok-free.app',
+]
 
 # Django REST Framework settings
 REST_FRAMEWORK = {
