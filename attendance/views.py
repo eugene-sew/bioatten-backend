@@ -351,6 +351,129 @@ class ClockOutView(APIView):
             logger.error(f"Error broadcasting attendance update: {str(e)}")
 
 
+class ManualClockInRequestView(APIView):
+    """Handle student manual clock-in requests."""
+    
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        """Process manual clock-in request."""
+        schedule_id = request.data.get('schedule_id')
+        reason = request.data.get('reason', '')
+        
+        if not schedule_id:
+            return Response(
+                {
+                    'success': False,
+                    'message': 'Schedule ID is required'
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            # Get student from authenticated user
+            student = Student.objects.get(user=request.user)
+        except Student.DoesNotExist:
+            return Response(
+                {
+                    'success': False,
+                    'message': 'Authenticated user is not a student'
+                },
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        try:
+            # Get schedule
+            schedule = Schedule.objects.get(id=schedule_id)
+        except Schedule.DoesNotExist:
+            return Response(
+                {
+                    'success': False,
+                    'message': 'Schedule not found'
+                },
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Check if student is enrolled in this schedule
+        if not schedule.groups.filter(students=student).exists():
+            return Response(
+                {
+                    'success': False,
+                    'message': 'You are not enrolled in this class'
+                },
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        current_date = timezone.now().date()
+        current_time = timezone.now().time()
+        
+        # Check if already has attendance for today
+        try:
+            attendance_log = AttendanceLog.objects.get(
+                student=student,
+                schedule=schedule,
+                date=current_date
+            )
+            
+            if attendance_log.check_in_time:
+                return Response(
+                    {
+                        'success': False,
+                        'message': 'Already clocked in for today',
+                        'status': attendance_log.status,
+                        'check_in_time': attendance_log.check_in_time
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        except AttendanceLog.DoesNotExist:
+            pass
+        
+        # Send manual clock-in request to faculty via Pusher
+        try:
+            from .pusher_client import trigger_faculty_notification
+            
+            notification_data = {
+                'type': 'manual_clock_in_request',
+                'student_id': student.student_id,
+                'student_name': student.user.full_name,
+                'student_email': student.user.email,
+                'schedule_id': schedule.id,
+                'course_code': schedule.course_code,
+                'course_name': schedule.course_name,
+                'reason': reason,
+                'request_time': current_time.strftime('%H:%M'),
+                'request_date': current_date.isoformat(),
+                'timestamp': timezone.now().isoformat(),
+            }
+            
+            success = trigger_faculty_notification(schedule.id, notification_data)
+            
+            if not success:
+                logger.warning(f"Failed to send Pusher notification for manual clock-in request")
+            
+        except Exception as e:
+            logger.error(f"Failed to send faculty notification: {e}")
+            return Response(
+                {
+                    'success': False,
+                    'message': 'Failed to send request to lecturer. Please try again.'
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        
+        return Response(
+            {
+                'success': True,
+                'message': 'Manual clock-in request sent to lecturer',
+                'student_name': student.user.full_name,
+                'course_code': schedule.course_code,
+                'request_time': current_time.strftime('%H:%M'),
+                'reason': reason
+            },
+            status=status.HTTP_200_OK
+        )
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def attendance_status(request, schedule_id):

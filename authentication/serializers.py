@@ -56,10 +56,26 @@ class UserSerializer(serializers.ModelSerializer):
             return None
         if not faculty:
             return None
+        
+        # Get faculty groups/courses
+        groups = []
+        try:
+            groups = [
+                {
+                    'id': group.id,
+                    'name': group.name,
+                    'code': group.code,
+                }
+                for group in faculty.groups.all()
+            ]
+        except Exception:
+            pass
+        
         return {
             'id': getattr(faculty, 'id', None),
             'faculty_id': getattr(faculty, 'faculty_id', None),
             'department': getattr(faculty, 'department', None),
+            'groups': groups,
         }
 
 
