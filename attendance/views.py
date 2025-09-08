@@ -395,7 +395,7 @@ class ManualClockInRequestView(APIView):
             )
         
         # Check if student is enrolled in this schedule
-        if not schedule.groups.filter(students=student).exists():
+        if not schedule.assigned_group.students.filter(id=student.id).exists():
             return Response(
                 {
                     'success': False,
