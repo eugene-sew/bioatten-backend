@@ -2,14 +2,7 @@
 
 Django REST API backend for the BioAttend facial recognition attendance system.
 
-## Features
 
-- PostgreSQL database configuration
-- JWT authentication using djangorestframework-simplejwt
-- CORS support for frontend integration
-- Media file handling for facial recognition data
-- Computer vision libraries: OpenCV, dlib, YOLOv8 (ultralytics)
-- Five main apps: authentication, students, schedules, attendance, facial_recognition
 
 ## Setup Instructions
 
