@@ -233,6 +233,23 @@ class FaceProcessor:
         # Create Django ContentFile
         return ContentFile(thumb_io.read(), name='thumbnail.jpg')
     
+    def calculate_cosine_similarity(self, embedding1: np.ndarray, embedding2: np.ndarray) -> float:
+        """Calculate cosine similarity between two embeddings."""
+        # Ensure embeddings are normalized
+        norm1 = np.linalg.norm(embedding1)
+        norm2 = np.linalg.norm(embedding2)
+        
+        if norm1 == 0 or norm2 == 0:
+            return 0.0
+        
+        embedding1_norm = embedding1 / norm1
+        embedding2_norm = embedding2 / norm2
+        
+        # Calculate cosine similarity
+        similarity = np.dot(embedding1_norm, embedding2_norm)
+        
+        return float(similarity)
+
     def calculate_quality_metrics(self, results: Dict) -> Dict:
         """Calculate quality metrics for the enrollment."""
         metrics = {

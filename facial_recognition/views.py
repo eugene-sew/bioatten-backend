@@ -99,6 +99,38 @@ class StudentEnrollmentView(APIView):
             # Calculate average embedding
             avg_embedding = processor.calculate_average_embedding(results['embeddings'])
             
+            # Check for duplicate enrollments (same face on different student accounts)
+            duplicate_threshold = 0.8  # Higher threshold for enrollment duplicates
+            existing_enrollments = FacialEnrollment.objects.filter(is_active=True).exclude(student=student)
+            
+            for existing in existing_enrollments:
+                try:
+                    existing_embedding = existing.get_embedding()
+                    similarity = processor.calculate_cosine_similarity(avg_embedding, existing_embedding)
+                    
+                    if similarity >= duplicate_threshold:
+                        attempt.status = 'FAILED'
+                        attempt.error_message = f"This face is already enrolled to another student account (similarity: {similarity:.2f})"
+                        attempt.processing_time = time.time() - start_time
+                        attempt.save()
+                        
+                        return Response(
+                            {
+                                'success': False,
+                                'message': f'This face is already enrolled to another student account: {existing.student.user.full_name}',
+                                'error_code': 'DUPLICATE_FACE_ENROLLMENT',
+                                'similarity_score': similarity,
+                                'duplicate_student': {
+                                    'name': existing.student.user.full_name,
+                                    'student_id': existing.student.student_id
+                                }
+                            },
+                            status=status.HTTP_409_CONFLICT
+                        )
+                except Exception as e:
+                    logger.warning(f"Error checking duplicate enrollment against student {existing.student.student_id}: {e}")
+                    continue
+            
             # Create thumbnail
             thumbnail = processor.create_thumbnail(results['face_images'])
             
@@ -376,6 +408,39 @@ class SelfEnrollmentView(APIView):
                 )
 
             avg_embedding = processor.calculate_average_embedding(results['embeddings'])
+            
+            # Check for duplicate enrollments (same face on different student accounts)
+            duplicate_threshold = 0.8  # Higher threshold for enrollment duplicates
+            existing_enrollments = FacialEnrollment.objects.filter(is_active=True).exclude(student=student)
+            
+            for existing in existing_enrollments:
+                try:
+                    existing_embedding = existing.get_embedding()
+                    similarity = processor.calculate_cosine_similarity(avg_embedding, existing_embedding)
+                    
+                    if similarity >= duplicate_threshold:
+                        attempt.status = 'FAILED'
+                        attempt.error_message = f"This face is already enrolled to another student account (similarity: {similarity:.2f})"
+                        attempt.processing_time = time.time() - start_time
+                        attempt.save()
+                        
+                        return Response(
+                            {
+                                'success': False,
+                                'message': f'This face is already enrolled to another student account: {existing.student.user.full_name}',
+                                'error_code': 'DUPLICATE_FACE_ENROLLMENT',
+                                'similarity_score': similarity,
+                                'duplicate_student': {
+                                    'name': existing.student.user.full_name,
+                                    'student_id': existing.student.student_id
+                                }
+                            },
+                            status=status.HTTP_409_CONFLICT
+                        )
+                except Exception as e:
+                    logger.warning(f"Error checking duplicate enrollment against student {existing.student.student_id}: {e}")
+                    continue
+            
             thumbnail = processor.create_thumbnail(results['face_images'])
             quality_metrics = processor.calculate_quality_metrics(results)
 
