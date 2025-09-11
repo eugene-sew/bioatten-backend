@@ -396,6 +396,8 @@ class ManualClockInRequestView(APIView):
         
         # Check if student is enrolled in this schedule
         if not schedule.assigned_group.students.filter(id=student.id).exists():
+            logger.error(f"Student {student.id} not found in group {schedule.assigned_group.id} for schedule {schedule.id}")
+            logger.error(f"Students in group: {list(schedule.assigned_group.students.values_list('id', flat=True))}")
             return Response(
                 {
                     'success': False,
@@ -432,6 +434,9 @@ class ManualClockInRequestView(APIView):
         try:
             from .pusher_client import trigger_faculty_notification
             
+            # Get course_name safely - it might not exist in the model
+            course_name = getattr(schedule, 'course_name', schedule.title)
+            
             notification_data = {
                 'type': 'manual_clock_in_request',
                 'student_id': student.student_id,
@@ -439,7 +444,7 @@ class ManualClockInRequestView(APIView):
                 'student_email': student.user.email,
                 'schedule_id': schedule.id,
                 'course_code': schedule.course_code,
-                'course_name': schedule.course_name,
+                'course_name': course_name,
                 'reason': reason,
                 'request_time': current_time.strftime('%H:%M'),
                 'request_date': current_date.isoformat(),
@@ -453,6 +458,8 @@ class ManualClockInRequestView(APIView):
             
         except Exception as e:
             logger.error(f"Failed to send faculty notification: {e}")
+            import traceback
+            logger.error(f"Full traceback: {traceback.format_exc()}")
             return Response(
                 {
                     'success': False,
