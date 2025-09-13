@@ -1,7 +1,9 @@
-from rest_framework import permissions, viewsets, mixins
+from rest_framework import permissions, viewsets, mixins, status
 from rest_framework.response import Response
 from rest_framework.decorators import action
+from rest_framework.views import APIView
 from django.db.models import Q
+from django.shortcuts import get_object_or_404
 
 from authentication.models import User
 from faculty.models import Faculty
@@ -98,3 +100,59 @@ class StudentGroupViewSet(viewsets.ModelViewSet):
             except Exception:
                 return StudentGroup.objects.none()
         return StudentGroup.objects.none()
+
+
+class StudentProfileUpdateView(APIView):
+    """
+    API endpoint to update student profile information, including course assignment.
+    Only accessible by admin users.
+    """
+    permission_classes = [permissions.IsAuthenticated, IsAdmin]
+    
+    def patch(self, request, student_id):
+        """Update student profile."""
+        try:
+            student = get_object_or_404(Student, student_id=student_id)
+            
+            # Get the new group ID from request data
+            group_id = request.data.get('group')
+            if group_id:
+                try:
+                    new_group = StudentGroup.objects.get(id=group_id)
+                    student.group = new_group
+                    student.save()
+                    
+                    return Response({
+                        'success': True,
+                        'message': f'Student {student.user.full_name} successfully assigned to course {new_group.name}',
+                        'student': {
+                            'id': student.student_id,
+                            'name': student.user.full_name,
+                            'group': {
+                                'id': new_group.id,
+                                'name': new_group.name,
+                                'code': new_group.code
+                            }
+                        }
+                    })
+                except StudentGroup.DoesNotExist:
+                    return Response({
+                        'success': False,
+                        'error': 'Invalid course selected'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                return Response({
+                    'success': False,
+                    'error': 'Course assignment is required'
+                }, status=status.HTTP_400_BAD_REQUEST)
+                
+        except Student.DoesNotExist:
+            return Response({
+                'success': False,
+                'error': 'Student not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({
+                'success': False,
+                'error': f'Failed to update student profile: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

@@ -100,13 +100,16 @@ class StudentEnrollmentView(APIView):
             avg_embedding = processor.calculate_average_embedding(results['embeddings'])
             
             # Check for duplicate enrollments (same face on different student accounts)
-            duplicate_threshold = 0.8  # Higher threshold for enrollment duplicates
+            duplicate_threshold = 0.95  # Very high threshold to avoid false positives
             existing_enrollments = FacialEnrollment.objects.filter(is_active=True).exclude(student=student)
             
             for existing in existing_enrollments:
                 try:
                     existing_embedding = existing.get_embedding()
                     similarity = processor.calculate_cosine_similarity(avg_embedding, existing_embedding)
+                    
+                    # Log similarity scores for debugging
+                    logger.info(f"Similarity check: New enrollment vs {existing.student.user.full_name} (ID: {existing.student.student_id}): {similarity:.3f}")
                     
                     if similarity >= duplicate_threshold:
                         attempt.status = 'FAILED'
@@ -410,13 +413,16 @@ class SelfEnrollmentView(APIView):
             avg_embedding = processor.calculate_average_embedding(results['embeddings'])
             
             # Check for duplicate enrollments (same face on different student accounts)
-            duplicate_threshold = 0.8  # Higher threshold for enrollment duplicates
+            duplicate_threshold = 0.95  # Very high threshold to avoid false positives
             existing_enrollments = FacialEnrollment.objects.filter(is_active=True).exclude(student=student)
             
             for existing in existing_enrollments:
                 try:
                     existing_embedding = existing.get_embedding()
                     similarity = processor.calculate_cosine_similarity(avg_embedding, existing_embedding)
+                    
+                    # Log similarity scores for debugging
+                    logger.info(f"Similarity check: New enrollment vs {existing.student.user.full_name} (ID: {existing.student.student_id}): {similarity:.3f}")
                     
                     if similarity >= duplicate_threshold:
                         attempt.status = 'FAILED'

@@ -578,3 +578,154 @@ class StudentAttendanceReportView(APIView):
         }
         
         return Response(report_data)
+
+
+class DetailedAttendanceRecordsView(APIView):
+    """API endpoint for detailed attendance records with student names."""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, *args, **kwargs):
+        # Get query parameters
+        group_code = request.query_params.get('group')
+        from_date = request.query_params.get('from')
+        to_date = request.query_params.get('to')
+        
+        # Validate parameters
+        if not all([group_code, from_date, to_date]):
+            return Response(
+                {"error": "Missing required parameters: group, from, to"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            # Parse dates
+            from_date = datetime.strptime(from_date, '%Y-%m-%d').date()
+            to_date = datetime.strptime(to_date, '%Y-%m-%d').date()
+            
+            # Get the student group
+            group = StudentGroup.objects.get(code=group_code)
+            
+        except ValueError:
+            return Response(
+                {"error": "Invalid date format. Use YYYY-MM-DD"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except StudentGroup.DoesNotExist:
+            return Response(
+                {"error": f"Student group with code '{group_code}' not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Get detailed attendance records
+        attendance_records = AttendanceLog.objects.filter(
+            schedule__assigned_group=group,
+            date__range=[from_date, to_date]
+        ).select_related('student__user', 'schedule').order_by('-date', 'student__user__last_name')
+        
+        # Prepare detailed records with student names
+        detailed_records = []
+        for record in attendance_records:
+            detailed_records.append({
+                'id': record.id,
+                'student_name': record.student.user.full_name,
+                'student_id': record.student.student_id,
+                'date': record.date.isoformat(),
+                'time': record.check_in_time.strftime('%H:%M:%S') if record.check_in_time else 'N/A',
+                'status': record.status,
+                'method': 'Facial Recognition' if record.face_recognition_confidence else 'Manual',
+                'course_code': record.schedule.course_code,
+                'course_title': record.schedule.title,
+                'is_late': record.is_late,
+                'is_manual_override': record.is_manual_override
+            })
+        
+        return Response({
+            'success': True,
+            'data': detailed_records,
+            'count': len(detailed_records)
+        })
+
+
+class DashboardStatsView(APIView):
+    """API endpoint for admin dashboard statistics."""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, *args, **kwargs):
+        from authentication.models import User
+        from schedules.models import Schedule
+        from datetime import date
+        
+        today = date.today()
+        
+        # Total users count
+        total_users = User.objects.count()
+        
+        # Total active students
+        total_students = Student.objects.filter(status='ACTIVE').count()
+        
+        # Total courses/groups
+        total_courses = StudentGroup.objects.count()
+        
+        # Today's schedules
+        todays_schedules = Schedule.objects.filter(date=today).count()
+        
+        # Today's attendance statistics
+        todays_attendance = AttendanceLog.objects.filter(date=today)
+        
+        total_attendance_records_today = todays_attendance.count()
+        present_today = todays_attendance.filter(status__in=['PRESENT', 'LATE']).count()
+        absent_today = todays_attendance.filter(status='ABSENT').count()
+        
+        # Calculate today's attendance rate
+        if total_attendance_records_today > 0:
+            attendance_rate_today = round((present_today / total_attendance_records_today) * 100, 1)
+        else:
+            attendance_rate_today = 0
+        
+        # Recent enrollments (last 7 days)
+        from facial_recognition.models import FacialEnrollment
+        from datetime import timedelta
+        
+        week_ago = today - timedelta(days=7)
+        recent_enrollments = FacialEnrollment.objects.filter(
+            enrollment_date__gte=week_ago,
+            is_active=True
+        ).count()
+        
+        # System-wide statistics
+        total_attendance_all_time = AttendanceLog.objects.count()
+        total_present_all_time = AttendanceLog.objects.filter(status__in=['PRESENT', 'LATE']).count()
+        
+        if total_attendance_all_time > 0:
+            overall_attendance_rate = round((total_present_all_time / total_attendance_all_time) * 100, 1)
+        else:
+            overall_attendance_rate = 0
+        
+        return Response({
+            'success': True,
+            'data': {
+                'users': {
+                    'total_users': total_users,
+                    'total_students': total_students,
+                    'recent_enrollments': recent_enrollments
+                },
+                'courses': {
+                    'total_courses': total_courses,
+                    'todays_schedules': todays_schedules
+                },
+                'attendance': {
+                    'today': {
+                        'total_records': total_attendance_records_today,
+                        'present': present_today,
+                        'absent': absent_today,
+                        'attendance_rate': attendance_rate_today
+                    },
+                    'overall': {
+                        'total_records': total_attendance_all_time,
+                        'present': total_present_all_time,
+                        'attendance_rate': overall_attendance_rate
+                    }
+                },
+                'date': today.isoformat()
+            }
+        })
