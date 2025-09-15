@@ -430,6 +430,47 @@ class ManualClockInRequestView(APIView):
         except AttendanceLog.DoesNotExist:
             pass
         
+        # Create manual clock-in request
+        try:
+            from .models import ManualClockInRequest
+            
+            # Check if request already exists for today
+            existing_request = ManualClockInRequest.objects.filter(
+                student=student,
+                schedule=schedule,
+                attendance_date=current_date,
+                status='pending'
+            ).first()
+            
+            if existing_request:
+                return Response(
+                    {
+                        'success': False,
+                        'message': 'Manual request already pending for today'
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Create new manual request
+            manual_request = ManualClockInRequest.objects.create(
+                student=student,
+                schedule=schedule,
+                attendance_date=current_date,
+                reason=reason,
+                priority='medium',  # Default priority
+                status='pending'
+            )
+            
+        except Exception as e:
+            logger.error(f"Failed to create manual request: {e}")
+            return Response(
+                {
+                    'success': False,
+                    'message': 'Failed to create manual request'
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        
         # Send manual clock-in request to faculty via Pusher
         try:
             from .pusher_client import trigger_faculty_notification
@@ -439,19 +480,28 @@ class ManualClockInRequestView(APIView):
             
             notification_data = {
                 'type': 'manual_clock_in_request',
+                'request_id': manual_request.id,
                 'student_id': student.student_id,
                 'student_name': student.user.full_name,
                 'student_email': student.user.email,
-                'schedule_id': schedule.id,
-                'course_code': schedule.course_code,
                 'course_name': course_name,
+                'course_code': getattr(schedule, 'course_code', ''),
+                'attendance_date': str(current_date),
                 'reason': reason,
-                'request_time': current_time.strftime('%H:%M'),
-                'request_date': current_date.isoformat(),
+                'priority': 'medium',
+                'schedule_id': schedule.id,
                 'timestamp': timezone.now().isoformat(),
             }
             
-            success = trigger_faculty_notification(schedule.id, notification_data)
+            # Send to both schedule-specific and faculty-specific channels
+            success1 = trigger_faculty_notification(schedule.id, notification_data)
+            
+            # Also send to faculty-specific channel
+            from .pusher_client import trigger
+            faculty_channel = f'faculty-{schedule.faculty.id}'
+            success2 = trigger(faculty_channel, 'attendance-notification', notification_data)
+            
+            success = success1 or success2
             
             if not success:
                 logger.warning(f"Failed to send Pusher notification for manual clock-in request")

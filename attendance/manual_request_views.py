@@ -171,6 +171,34 @@ class ManualRequestActionView(APIView):
                     attendance_log.override_reason = f"Manual request approved: {manual_request.reason}"
                     attendance_log.override_by = user
                     attendance_log.save()
+            
+            # Send notification about the decision
+            try:
+                from .pusher_client import trigger
+                
+                notification_data = {
+                    'type': 'manual_request_decision',
+                    'request_id': manual_request.id,
+                    'student_id': manual_request.student.student_id,
+                    'student_name': manual_request.student.user.full_name,
+                    'course_name': manual_request.schedule.title,
+                    'action': action,
+                    'status': manual_request.status,
+                    'admin_response': admin_reason,
+                    'reviewed_by': user.full_name,
+                    'timestamp': timezone.now().isoformat(),
+                }
+                
+                # Send to faculty channel
+                faculty_channel = f'faculty-{manual_request.schedule.faculty.id}'
+                trigger(faculty_channel, 'attendance-notification', notification_data)
+                
+                # Send to student channel
+                student_channel = f'student-{manual_request.student.id}'
+                trigger(student_channel, 'attendance-notification', notification_data)
+                
+            except Exception as e:
+                logger.error(f"Failed to send decision notification: {e}")
         
         action_text = 'approved' if action == 'approve' else 'rejected'
         return Response({

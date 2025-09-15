@@ -18,8 +18,8 @@ class AWSRekognitionService:
         """Initialize AWS Rekognition client."""
         self.client = boto3.client(
             'rekognition',
-            aws_access_key_id=getattr(settings, 'AWS_ACCESS_KEY_ID', 'AKIAUH5KX4IS72YY6UPJ'),
-            aws_secret_access_key=getattr(settings, 'AWS_SECRET_ACCESS_KEY', '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'),
+            aws_access_key_id=getattr(settings, 'AWS_ACCESS_KEY_ID', None),
+            aws_secret_access_key=getattr(settings, 'AWS_SECRET_ACCESS_KEY', None),
             region_name=getattr(settings, 'AWS_REGION', 'us-east-1')
         )
         self.collection_id = getattr(settings, 'AWS_REKOGNITION_COLLECTION_ID', 'bioattend-faces')
