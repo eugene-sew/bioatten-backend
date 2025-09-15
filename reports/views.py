@@ -629,6 +629,7 @@ class DetailedAttendanceRecordsView(APIView):
                 'id': record.id,
                 'student_name': record.student.user.full_name,
                 'student_id': record.student.student_id,
+                'student_email': record.student.user.email,
                 'date': record.date.isoformat(),
                 'time': record.check_in_time.strftime('%H:%M:%S') if record.check_in_time else 'N/A',
                 'status': record.status,
