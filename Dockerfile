@@ -35,10 +35,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # ------------------------------------------------------------------------------
 # Install Python dependencies
 # ------------------------------------------------------------------------------
-COPY deploy_requirements.txt /app/
+COPY requirements.txt /app/
 RUN pip install --upgrade pip && \
     pip install "setuptools==80.9.0" && \
-    pip install -r deploy_requirements.txt
+    pip install -r requirements.txt
 
 # ------------------------------------------------------------------------------
 # Copy application code
