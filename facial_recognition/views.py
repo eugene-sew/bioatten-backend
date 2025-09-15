@@ -4,10 +4,11 @@ from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.shortcuts import get_object_or_404
-from django.db import transaction
 from django.utils import timezone
-import time
+from django.db import transaction
+from datetime import timedelta
 import logging
+import time
 
 from students.models import Student
 from .models import FacialEnrollment, EnrollmentAttempt
@@ -18,6 +19,7 @@ from .serializers import (
     EnrollmentAttemptSerializer
 )
 from .utils import FaceProcessor
+from .aws_utils import aws_face_processor
 
 logger = logging.getLogger(__name__)
 
@@ -71,18 +73,17 @@ class StudentEnrollmentView(APIView):
         start_time = time.time()
         
         try:
-            # Process the media file
-            processor = FaceProcessor()
-            results = processor.process_media_for_enrollment(media_file, file_extension)
+            # Process the media file using AWS or legacy processor
+            results = aws_face_processor.process_enrollment(media_file, file_extension, student)
             
             # Update attempt with results
-            attempt.frames_processed = results['frames_processed']
-            attempt.faces_detected = results['faces_detected']
+            attempt.frames_processed = results.get('frames_processed', 0)
+            attempt.faces_detected = results.get('faces_detected', 0)
             
-            # Check if enough faces were detected
-            if results['faces_detected'] < 5:
+            # Check if processing was successful
+            if not results['success']:
                 attempt.status = 'FAILED'
-                attempt.error_message = f"Insufficient faces detected: {results['faces_detected']}. Minimum 5 required."
+                attempt.error_message = results.get('error', 'Unknown error during processing')
                 attempt.processing_time = time.time() - start_time
                 attempt.save()
                 
@@ -90,89 +91,27 @@ class StudentEnrollmentView(APIView):
                     {
                         'success': False,
                         'message': attempt.error_message,
-                        'quality_metrics': processor.calculate_quality_metrics(results),
-                        'errors': results['errors']
+                        'provider': results.get('provider', 'UNKNOWN')
                     },
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            # Calculate average embedding
-            avg_embedding = processor.calculate_average_embedding(results['embeddings'])
-            
-            # Check for duplicate enrollments (same face on different student accounts)
-            duplicate_threshold = 0.95  # Very high threshold to avoid false positives
-            existing_enrollments = FacialEnrollment.objects.filter(is_active=True).exclude(student=student)
-            
-            for existing in existing_enrollments:
-                try:
-                    existing_embedding = existing.get_embedding()
-                    similarity = processor.calculate_cosine_similarity(avg_embedding, existing_embedding)
-                    
-                    # Log similarity scores for debugging
-                    logger.info(f"Similarity check: New enrollment vs {existing.student.user.full_name} (ID: {existing.student.student_id}): {similarity:.3f}")
-                    
-                    if similarity >= duplicate_threshold:
-                        attempt.status = 'FAILED'
-                        attempt.error_message = f"This face is already enrolled to another student account (similarity: {similarity:.2f})"
-                        attempt.processing_time = time.time() - start_time
-                        attempt.save()
-                        
-                        return Response(
-                            {
-                                'success': False,
-                                'message': f'This face is already enrolled to another student account: {existing.student.user.full_name}',
-                                'error_code': 'DUPLICATE_FACE_ENROLLMENT',
-                                'similarity_score': similarity,
-                                'duplicate_student': {
-                                    'name': existing.student.user.full_name,
-                                    'student_id': existing.student.student_id
-                                }
-                            },
-                            status=status.HTTP_409_CONFLICT
-                        )
-                except Exception as e:
-                    logger.warning(f"Error checking duplicate enrollment against student {existing.student.student_id}: {e}")
-                    continue
-            
-            # Create thumbnail
-            thumbnail = processor.create_thumbnail(results['face_images'])
-            
-            # Calculate quality metrics
-            quality_metrics = processor.calculate_quality_metrics(results)
-            
-            # Create or update facial enrollment
-            with transaction.atomic():
-                enrollment, created = FacialEnrollment.objects.update_or_create(
-                    student=student,
-                    defaults={
-                        'face_confidence': quality_metrics['average_confidence'],
-                        'embedding_quality': quality_metrics['overall_quality'],
-                        'num_faces_detected': results['faces_detected'],
-                        'is_active': True
-                    }
-                )
-                
-                # Set embedding and thumbnail
-                enrollment.set_embedding(avg_embedding)
-                enrollment.thumbnail.save(f'student_{student.id}_thumbnail.jpg', thumbnail)
-                enrollment.save()
-                
-                # Update attempt status
-                attempt.status = 'SUCCESS'
-                attempt.processing_time = time.time() - start_time
-                attempt.save()
-            
-            # Prepare response
-            enrollment_serializer = FacialEnrollmentSerializer(enrollment, context={'request': request})
+            # Success case
+            attempt.status = 'SUCCESS'
+            attempt.processing_time = time.time() - start_time
+            attempt.save()
             
             return Response(
                 {
                     'success': True,
-                    'message': f"Successfully enrolled facial data for {student.user.full_name}",
-                    'enrollment': enrollment_serializer.data,
-                    'quality_metrics': quality_metrics
+                    'message': 'Facial enrollment completed successfully',
+                    'enrollment_id': results.get('enrollment_id'),
+                    'confidence': results.get('confidence'),
+                    'faces_detected': results.get('faces_detected'),
+                    'frames_processed': results.get('frames_processed'),
+                    'provider': results.get('provider')
                 },
-                status=status.HTTP_201_CREATED if created else status.HTTP_200_OK
+                status=status.HTTP_201_CREATED
             )
             
         except Exception as e:
@@ -192,7 +131,83 @@ class StudentEnrollmentView(APIView):
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+class EnrollmentStatisticsView(APIView):
+    """Get enrollment statistics for admin dashboard."""
     
+    permission_classes = [IsAuthenticated, IsAdminUser]
+    
+    def get(self, request):
+        """Get enrollment statistics."""
+        try:
+            from students.models import Student
+            
+            # Total students
+            total_students = Student.objects.filter(status='ACTIVE').count()
+            
+            # Total enrollments
+            total_enrollments = FacialEnrollment.objects.filter(is_active=True).count()
+            
+            # AWS vs DLIB enrollments
+            aws_enrollments = FacialEnrollment.objects.filter(
+                is_active=True, 
+                provider='AWS_REKOGNITION'
+            ).count()
+            dlib_enrollments = FacialEnrollment.objects.filter(
+                is_active=True, 
+                provider='DLIB'
+            ).count()
+            
+            # Recent enrollment attempts
+            recent_attempts = EnrollmentAttempt.objects.filter(
+                created_at__gte=timezone.now() - timedelta(days=7)
+            ).count()
+            
+            # Success rate
+            successful_attempts = EnrollmentAttempt.objects.filter(
+                created_at__gte=timezone.now() - timedelta(days=7),
+                status='SUCCESS'
+            ).count()
+            
+            success_rate = (successful_attempts / recent_attempts * 100) if recent_attempts > 0 else 0
+            
+            # Enrollment rate
+            enrollment_rate = (total_enrollments / total_students * 100) if total_students > 0 else 0
+            
+            return Response({
+                'success': True,
+                'statistics': {
+                    'total_students': total_students,
+                    'total_enrollments': total_enrollments,
+                    'enrollment_rate': round(enrollment_rate, 1),
+                    'aws_enrollments': aws_enrollments,
+                    'dlib_enrollments': dlib_enrollments,
+                    'recent_attempts': recent_attempts,
+                    'success_rate': round(success_rate, 1),
+                    'provider_distribution': {
+                        'AWS_REKOGNITION': aws_enrollments,
+                        'DLIB': dlib_enrollments
+                    }
+                }
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            logger.error(f"Error getting enrollment statistics: {str(e)}", exc_info=True)
+            return Response(
+                {
+                    'success': False,
+                    'error': str(e)
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class StudentEnrollmentView(APIView):
+    """Handle facial enrollment for students."""
+
+    permission_classes = [IsAuthenticated]
+
     def get(self, request, student_id):
         """Get enrollment status for a student."""
         try:
@@ -388,15 +403,16 @@ class SelfEnrollmentView(APIView):
         start_time = time.time()
 
         try:
-            processor = FaceProcessor()
-            results = processor.process_media_for_enrollment(media_file, file_extension)
+            # Use AWS Rekognition for enrollment processing
+            results = aws_face_processor.process_enrollment(media_file, file_extension, student)
 
-            attempt.frames_processed = results['frames_processed']
-            attempt.faces_detected = results['faces_detected']
+            attempt.frames_processed = results.get('frames_processed', 0)
+            attempt.faces_detected = results.get('faces_detected', 0)
 
-            if results['faces_detected'] < 5:
+            # Check if processing was successful
+            if not results['success']:
                 attempt.status = 'FAILED'
-                attempt.error_message = f"Insufficient faces detected: {results['faces_detected']}. Minimum 5 required."
+                attempt.error_message = results.get('error', 'Unknown error during processing')
                 attempt.processing_time = time.time() - start_time
                 attempt.save()
 
@@ -404,71 +420,18 @@ class SelfEnrollmentView(APIView):
                     {
                         'success': False,
                         'message': attempt.error_message,
-                        'quality_metrics': processor.calculate_quality_metrics(results),
-                        'errors': results['errors']
+                        'provider': results.get('provider', 'AWS_REKOGNITION')
                     },
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            avg_embedding = processor.calculate_average_embedding(results['embeddings'])
-            
-            # Check for duplicate enrollments (same face on different student accounts)
-            duplicate_threshold = 0.95  # Very high threshold to avoid false positives
-            existing_enrollments = FacialEnrollment.objects.filter(is_active=True).exclude(student=student)
-            
-            for existing in existing_enrollments:
-                try:
-                    existing_embedding = existing.get_embedding()
-                    similarity = processor.calculate_cosine_similarity(avg_embedding, existing_embedding)
-                    
-                    # Log similarity scores for debugging
-                    logger.info(f"Similarity check: New enrollment vs {existing.student.user.full_name} (ID: {existing.student.student_id}): {similarity:.3f}")
-                    
-                    if similarity >= duplicate_threshold:
-                        attempt.status = 'FAILED'
-                        attempt.error_message = f"This face is already enrolled to another student account (similarity: {similarity:.2f})"
-                        attempt.processing_time = time.time() - start_time
-                        attempt.save()
-                        
-                        return Response(
-                            {
-                                'success': False,
-                                'message': f'This face is already enrolled to another student account: {existing.student.user.full_name}',
-                                'error_code': 'DUPLICATE_FACE_ENROLLMENT',
-                                'similarity_score': similarity,
-                                'duplicate_student': {
-                                    'name': existing.student.user.full_name,
-                                    'student_id': existing.student.student_id
-                                }
-                            },
-                            status=status.HTTP_409_CONFLICT
-                        )
-                except Exception as e:
-                    logger.warning(f"Error checking duplicate enrollment against student {existing.student.student_id}: {e}")
-                    continue
-            
-            thumbnail = processor.create_thumbnail(results['face_images'])
-            quality_metrics = processor.calculate_quality_metrics(results)
+            # Success case
+            attempt.status = 'SUCCESS'
+            attempt.processing_time = time.time() - start_time
+            attempt.save()
 
-            with transaction.atomic():
-                enrollment, created = FacialEnrollment.objects.update_or_create(
-                    student=student,
-                    defaults={
-                        'face_confidence': quality_metrics['average_confidence'],
-                        'embedding_quality': quality_metrics['overall_quality'],
-                        'num_faces_detected': results['faces_detected'],
-                        'is_active': True
-                    }
-                )
-
-                enrollment.set_embedding(avg_embedding)
-                enrollment.thumbnail.save(f'student_{student.id}_thumbnail.jpg', thumbnail)
-                enrollment.save()
-
-                attempt.status = 'SUCCESS'
-                attempt.processing_time = time.time() - start_time
-                attempt.save()
-
+            # Get the created enrollment for response
+            enrollment = FacialEnrollment.objects.get(id=results['enrollment_id'])
             enrollment_serializer = FacialEnrollmentSerializer(enrollment, context={'request': request})
 
             return Response(
@@ -476,9 +439,13 @@ class SelfEnrollmentView(APIView):
                     'success': True,
                     'message': f"Successfully enrolled facial data for {student.user.full_name}",
                     'enrollment': enrollment_serializer.data,
-                    'quality_metrics': quality_metrics
+                    'enrollment_id': results.get('enrollment_id'),
+                    'confidence': results.get('confidence'),
+                    'faces_detected': results.get('faces_detected'),
+                    'frames_processed': results.get('frames_processed'),
+                    'provider': results.get('provider', 'AWS_REKOGNITION')
                 },
-                status=status.HTTP_201_CREATED if created else status.HTTP_200_OK
+                status=status.HTTP_201_CREATED
             )
 
         except Exception as e:

@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import AttendanceLog
+from .models import AttendanceLog, ManualClockInRequest
 from students.models import Student
 from schedules.models import Schedule
 from facial_recognition.models import FacialEnrollment
@@ -81,3 +81,30 @@ class RealTimeAttendanceUpdateSerializer(serializers.Serializer):
     type = serializers.ChoiceField(choices=['clock_in', 'clock_out', 'status_change'])
     attendance_log = AttendanceLogSerializer()
     timestamp = serializers.DateTimeField()
+
+
+class ManualClockInRequestSerializer(serializers.ModelSerializer):
+    """Serializer for ManualClockInRequest model."""
+    
+    student_name = serializers.CharField(source='student.user.full_name', read_only=True)
+    student_id = serializers.CharField(source='student.student_id', read_only=True)
+    student_email = serializers.CharField(source='student.user.email', read_only=True)
+    course_name = serializers.CharField(source='schedule.title', read_only=True)
+    course_code = serializers.CharField(source='schedule.course_code', read_only=True)
+    reviewed_by_name = serializers.CharField(source='reviewed_by.full_name', read_only=True)
+    
+    class Meta:
+        model = ManualClockInRequest
+        fields = [
+            'id', 'student', 'student_name', 'student_id', 'student_email',
+            'schedule', 'course_name', 'course_code', 'attendance_date',
+            'reason', 'status', 'priority', 'reviewed_by', 'reviewed_by_name',
+            'admin_response', 'reviewed_at', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['student', 'schedule', 'created_at', 'updated_at']
+
+
+class ManualRequestActionSerializer(serializers.Serializer):
+    """Serializer for approve/reject manual request actions."""
+    
+    reason = serializers.CharField(required=False, allow_blank=True, max_length=500)

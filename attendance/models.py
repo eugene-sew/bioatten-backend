@@ -81,3 +81,64 @@ class AttendanceLog(BaseModel):
             # Consider late if checked in more than 10 minutes after start
             return (check_in - start).total_seconds() > 600
         return False
+
+
+class ManualClockInRequest(BaseModel):
+    """Model for manual clock-in requests that need faculty approval."""
+    
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+    ]
+    
+    PRIORITY_CHOICES = [
+        ('low', 'Low'),
+        ('medium', 'Medium'),
+        ('high', 'High'),
+    ]
+    
+    student = models.ForeignKey(
+        Student,
+        on_delete=models.CASCADE,
+        related_name='manual_requests'
+    )
+    schedule = models.ForeignKey(
+        Schedule,
+        on_delete=models.CASCADE,
+        related_name='manual_requests'
+    )
+    attendance_date = models.DateField()
+    reason = models.TextField()
+    status = models.CharField(
+        max_length=10,
+        choices=STATUS_CHOICES,
+        default='pending',
+        db_index=True
+    )
+    priority = models.CharField(
+        max_length=10,
+        choices=PRIORITY_CHOICES,
+        default='medium'
+    )
+    
+    # Admin response fields
+    reviewed_by = models.ForeignKey(
+        'authentication.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='reviewed_manual_requests'
+    )
+    admin_response = models.TextField(blank=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    
+    class Meta:
+        db_table = 'manual_clock_in_requests'
+        verbose_name = 'Manual Clock-in Request'
+        verbose_name_plural = 'Manual Clock-in Requests'
+        ordering = ['-created_at']
+        unique_together = [['student', 'schedule', 'attendance_date']]
+    
+    def __str__(self):
+        return f"{self.student} - {self.schedule.course_code} - {self.attendance_date} ({self.get_status_display()})"

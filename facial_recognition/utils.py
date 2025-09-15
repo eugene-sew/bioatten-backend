@@ -1,24 +1,25 @@
 import cv2
 import numpy as np
-import tempfile
-import zipfile
-import os
-from typing import List, Tuple, Dict, Optional
-from PIL import Image
-import io
-from django.core.files.base import ContentFile
-from django.core.files.uploadedfile import InMemoryUploadedFile
+from PIL import Image, ImageDraw, ImageFont
 import logging
+import io
+from typing import List, Dict, Optional, Tuple
+import zipfile
+import tempfile
+import os
+from django.core.files.base import ContentFile
+from django.conf import settings
+
+from .aws_rekognition import AWSRekognitionService
 
 logger = logging.getLogger(__name__)
 
 
 class FaceProcessor:
-    """Handles face detection, alignment, and embedding extraction."""
+    """Handles face detection, alignment, and embedding extraction using AWS Rekognition."""
     
     def __init__(self):
-        # We'll use face_recognition (dlib) for face detection
-        pass
+        self.aws_service = AWSRekognitionService()
     
     def extract_frames_from_video(self, video_path: str, max_frames: int = 30) -> List[np.ndarray]:
         """Extract frames from video file."""
@@ -71,24 +72,39 @@ class FaceProcessor:
         return images
     
     def detect_faces(self, image: np.ndarray) -> List[Dict]:
-        """Detect faces using face_recognition (dlib)."""
-        import face_recognition
-        # Use CNN model for better accuracy when available
+        """Detect faces using AWS Rekognition."""
         try:
-            face_locations = face_recognition.face_locations(image, model='cnn')
-        except:
-            # Fallback to HOG model if CNN fails (e.g., no GPU)
-            face_locations = face_recognition.face_locations(image, model='hog')
-        
-        faces = []
-        for (top, right, bottom, left) in face_locations:
-            faces.append({
-                'box': (left, top, right, bottom),
-                'confidence': 0.95  # Default confidence for dlib
-            })
-        
-        return faces
-    
+            # Convert numpy array to PIL Image
+            pil_image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+            
+            # Use AWS Rekognition for face detection
+            faces_data = self.aws_service.detect_faces(pil_image)
+            
+            faces = []
+            for face_data in faces_data:
+                bbox = face_data['BoundingBox']
+                confidence = face_data['Confidence']
+                
+                # Convert relative coordinates to absolute pixels
+                height, width = image.shape[:2]
+                x = int(bbox['Left'] * width)
+                y = int(bbox['Top'] * height)
+                w = int(bbox['Width'] * width)
+                h = int(bbox['Height'] * height)
+                
+                # Extract face region
+                face_image = image[y:y+h, x:x+w]
+                
+                faces.append({
+                    'bbox': (x, y, w, h),  # x, y, width, height
+                    'confidence': confidence / 100.0,  # Convert to 0-1 range
+                    'face_image': face_image
+                })
+            
+            return faces
+        except Exception as e:
+            logger.error(f"Error detecting faces with AWS Rekognition: {e}")
+            return []
     
     def align_and_crop_face(self, image: np.ndarray, face_box: Tuple[int, int, int, int], 
                            padding: float = 0.2) -> Optional[np.ndarray]:
@@ -118,19 +134,19 @@ class FaceProcessor:
         
         return None
     
-    def extract_face_embedding(self, face_image: np.ndarray) -> Optional[np.ndarray]:
-        """Extract 128-D face embedding using face_recognition."""
+    def extract_face_embedding(self, face_image: np.ndarray) -> Optional[str]:
+        """Extract face ID using AWS Rekognition (no longer returns embeddings)."""
         try:
-            import face_recognition
-            # face_recognition expects RGB images
-            face_encodings = face_recognition.face_encodings(face_image)
+            # Convert numpy array to PIL Image
+            pil_image = Image.fromarray(cv2.cvtColor(face_image, cv2.COLOR_BGR2RGB))
             
-            if face_encodings:
-                return face_encodings[0]  # Return first encoding (128-D vector)
-            
-            return None
+            # AWS Rekognition doesn't return embeddings directly
+            # Instead, we'll return a placeholder that indicates AWS processing
+            # The actual face matching will be done through AWS collections
+            return "aws_face_processed"
+                
         except Exception as e:
-            logger.error(f"Error extracting face embedding: {e}")
+            logger.error(f"Error processing face with AWS Rekognition: {e}")
             return None
     
     def process_media_for_enrollment(self, media_file, file_type: str) -> Dict:

@@ -41,7 +41,7 @@ urlpatterns = [
     path('redoc/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
     path('admin/', admin.site.urls),
     path('api/auth/', include('authentication.urls')),
-    path('api/', include('facial_recognition.urls')),
+    path('api/facial_recognition/', include('facial_recognition.urls')),
     path('api/', include('schedules.urls')),
     path('api/', include('students.urls')),
     path('api/', include('faculty.urls')),

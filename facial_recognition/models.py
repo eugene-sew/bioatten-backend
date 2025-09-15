@@ -15,8 +15,40 @@ class FacialEnrollment(BaseModel):
         related_name='facial_enrollment'
     )
     
-    # Store the 128-D embedding as a binary field
-    embedding = models.BinaryField(help_text="128-D facial embedding")
+    # Legacy: Store the 128-D embedding as a binary field (deprecated - use AWS Rekognition)
+    embedding = models.BinaryField(help_text="128-D facial embedding (deprecated)", null=True, blank=True)
+    
+    # AWS Rekognition fields
+    aws_face_id = models.CharField(
+        max_length=255, 
+        null=True, 
+        blank=True,
+        help_text="AWS Rekognition Face ID"
+    )
+    aws_external_image_id = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        help_text="AWS Rekognition External Image ID"
+    )
+    aws_image_id = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        help_text="AWS Rekognition Image ID"
+    )
+    
+    # Provider type
+    PROVIDER_CHOICES = [
+        ('DLIB', 'DLIB (Legacy)'),
+        ('AWS_REKOGNITION', 'AWS Rekognition'),
+    ]
+    provider = models.CharField(
+        max_length=20,
+        choices=PROVIDER_CHOICES,
+        default='AWS_REKOGNITION',
+        help_text="Facial recognition provider"
+    )
     
     # Store the thumbnail image
     thumbnail = models.ImageField(
@@ -26,7 +58,7 @@ class FacialEnrollment(BaseModel):
     
     # Quality metrics
     face_confidence = models.FloatField(
-        validators=[MinValueValidator(0.0), MaxValueValidator(1.0)],
+        validators=[MinValueValidator(0.0), MaxValueValidator(100.0)],
         help_text="Confidence score of face detection"
     )
     
@@ -64,7 +96,17 @@ class FacialEnrollment(BaseModel):
     
     def get_embedding_base64(self):
         """Return the embedding as a base64 encoded string."""
-        return base64.b64encode(self.embedding).decode('utf-8')
+        if self.embedding:
+            return base64.b64encode(self.embedding).decode('utf-8')
+        return None
+    
+    def is_aws_enrolled(self):
+        """Check if student is enrolled using AWS Rekognition."""
+        return self.provider == 'AWS_REKOGNITION' and self.aws_face_id
+    
+    def is_legacy_enrolled(self):
+        """Check if student is enrolled using legacy DLIB system."""
+        return self.provider == 'DLIB' and self.embedding
 
 
 class EnrollmentAttempt(BaseModel):

@@ -5,18 +5,18 @@ import cv2
 from PIL import Image
 from typing import Optional, Tuple, Dict
 import logging
-from facial_recognition.utils import FaceProcessor
+from facial_recognition.aws_rekognition import AWSRekognitionService
 from facial_recognition.models import FacialEnrollment
 
 logger = logging.getLogger(__name__)
 
 
 class FaceVerificationService:
-    """Service for verifying faces against enrolled student embeddings."""
+    """Service for verifying faces against enrolled students using AWS Rekognition."""
     
-    def __init__(self, similarity_threshold: float = 0.6):
+    def __init__(self, similarity_threshold: float = 80.0):
         self.similarity_threshold = similarity_threshold
-        self.face_processor = FaceProcessor()
+        self.aws_service = AWSRekognitionService()
     
     def decode_base64_image(self, base64_string: str) -> np.ndarray:
         """Decode base64 string to numpy array image."""
@@ -42,43 +42,28 @@ class FaceVerificationService:
             logger.error(f"Error decoding base64 image: {str(e)}")
             raise ValueError(f"Failed to decode image: {str(e)}")
     
-    def calculate_cosine_similarity(self, embedding1: np.ndarray, embedding2: np.ndarray) -> float:
-        """Calculate cosine similarity between two embeddings."""
-        # Ensure embeddings are normalized
-        norm1 = np.linalg.norm(embedding1)
-        norm2 = np.linalg.norm(embedding2)
-        
-        if norm1 == 0 or norm2 == 0:
-            return 0.0
-        
-        embedding1_norm = embedding1 / norm1
-        embedding2_norm = embedding2 / norm2
-        
-        # Calculate cosine similarity
-        similarity = np.dot(embedding1_norm, embedding2_norm)
-        
-        return float(similarity)
+    def _get_student_external_id(self, student_id: int) -> str:
+        """Generate external ID for AWS Rekognition face collection."""
+        return f"student_{student_id}"
     
     def verify_face(self, snapshot_base64: str, student_id: int) -> Dict:
         """
-        Verify a face snapshot against a student's enrolled embedding.
+        Verify a face snapshot against a student's enrolled face using AWS Rekognition.
         
         Returns:
             Dict containing:
                 - verified: bool - Whether verification was successful
-                - confidence: float - Confidence score (0-1)
+                - confidence: float - Confidence score (0-100)
                 - message: str - Status message
-                - embedding: np.ndarray - The extracted embedding (if successful)
         """
         result = {
             'verified': False,
             'confidence': 0.0,
-            'message': 'Verification failed',
-            'embedding': None
+            'message': 'Verification failed'
         }
         
         try:
-            # Get student's enrollment
+            # Check if student has enrollment record
             try:
                 enrollment = FacialEnrollment.objects.get(
                     student_id=student_id,
@@ -88,63 +73,49 @@ class FaceVerificationService:
                 result['message'] = 'Student has no active facial enrollment'
                 return result
             
-            # Decode the snapshot
+            # Decode the snapshot image
             snapshot_image = self.decode_base64_image(snapshot_base64)
             
-            # Detect faces in snapshot
-            faces = self.face_processor.detect_faces(snapshot_image)
+            # Convert to PIL Image for AWS Rekognition
+            pil_image = Image.fromarray(snapshot_image)
             
-            if not faces:
-                result['message'] = 'No face detected in snapshot'
-                return result
-            
-            if len(faces) > 1:
-                result['message'] = 'Multiple faces detected in snapshot'
-                return result
-            
-            # Get the single face
-            face = faces[0]
-            
-            # Crop and align the face
-            face_img = self.face_processor.align_and_crop_face(
-                snapshot_image, 
-                face['box']
+            # Use AWS Rekognition to search for matching faces
+            matches = self.aws_service.search_faces_by_image(
+                image_data=pil_image,
+                max_faces=1
             )
             
-            if face_img is None:
-                result['message'] = 'Failed to process detected face'
+            if not matches:
+                # Check if student is enrolled but face not found
+                if enrollment.provider == 'AWS_REKOGNITION' and enrollment.aws_face_id:
+                    result['message'] = 'Face not recognized. Please ensure good lighting and look directly at the camera, or contact support if the issue persists.'
+                else:
+                    result['message'] = 'You are not enrolled for facial recognition. Please complete your facial enrollment first.'
                 return result
             
-            # Extract embedding from snapshot
-            snapshot_embedding = self.face_processor.extract_face_embedding(face_img)
+            # Check if the match is for this student
+            best_match = matches[0]
+            expected_external_id = self._get_student_external_id(student_id)
             
-            if snapshot_embedding is None:
-                result['message'] = 'Failed to extract face embedding from snapshot'
-                return result
-            
-            # Get stored embedding
-            stored_embedding = enrollment.get_embedding()
-            
-            # Calculate similarity
-            similarity = self.calculate_cosine_similarity(snapshot_embedding, stored_embedding)
-            
-            # Check against threshold
-            if similarity >= self.similarity_threshold:
-                result['verified'] = True
-                result['confidence'] = similarity
-                result['message'] = 'Face verified successfully'
-                result['embedding'] = snapshot_embedding
+            if best_match['external_image_id'] == expected_external_id:
+                similarity = best_match['similarity']
+                
+                if similarity >= self.similarity_threshold:
+                    result['verified'] = True
+                    result['confidence'] = float(similarity)
+                    result['message'] = 'Face verification successful'
+                else:
+                    result['confidence'] = float(similarity)
+                    result['message'] = 'Face recognition confidence too low. Please ensure good lighting and look directly at the camera.'
             else:
-                result['confidence'] = similarity
-                result['message'] = f'Face similarity ({similarity:.2f}) below threshold ({self.similarity_threshold})'
+                result['message'] = 'Face recognized but belongs to a different student. Please ensure you are using your own account.'
             
-            logger.info(f"Face verification for student {student_id}: similarity={similarity:.3f}, verified={result['verified']}")
+            return result
             
         except Exception as e:
-            logger.error(f"Error during face verification: {str(e)}", exc_info=True)
+            logger.error(f"AWS Rekognition verification error: {str(e)}")
             result['message'] = f'Verification error: {str(e)}'
-        
-        return result
+            return result
     
     def save_verification_image(self, image_array: np.ndarray, attendance_log_id: int, 
                               is_clock_in: bool = True) -> Optional[str]:

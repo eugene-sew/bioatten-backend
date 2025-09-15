@@ -2,6 +2,10 @@ from django.urls import path
 from .views import ClockInView, ClockOutView, ManualClockInRequestView, attendance_status
 from .sse_views import attendance_updates_sse, test_attendance_broadcast
 from .faculty_views import get_schedule_attendance, manual_clock_in
+from .manual_request_views import (
+    get_manual_requests, approve_manual_request, reject_manual_request,
+    ManualRequestsListView, ManualRequestActionView
+)
 
 app_name = 'attendance'
 
@@ -10,6 +14,11 @@ urlpatterns = [
     path('api/attendance/clock_out/', ClockOutView.as_view(), name='clock-out'),
     path('api/attendance/manual_clock_in_request/', ManualClockInRequestView.as_view(), name='manual-clock-in-request'),
     path('api/attendance/status/<int:schedule_id>/', attendance_status, name='attendance-status'),
+    
+    # Manual requests endpoints
+    path('api/attendance/manual-requests/', ManualRequestsListView.as_view(), name='manual-requests-list'),
+    path('api/attendance/manual-requests/<int:request_id>/approve/', approve_manual_request, name='approve-manual-request'),
+    path('api/attendance/manual-requests/<int:request_id>/reject/', reject_manual_request, name='reject-manual-request'),
     
     # Faculty endpoints
     path('api/attendance/schedule/<int:schedule_id>/', get_schedule_attendance, name='schedule-attendance'),
